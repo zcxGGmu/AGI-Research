@@ -483,3 +483,154 @@ project/
 
 ---
 
+
+---
+
+## 18. 竞赛评分算法细化（公式与异常处理）
+
+### 18.1 指标定义
+
+- **Total Return (TR)**
+  - `TR = (Equity_end - Equity_start) / Equity_start`
+- **Max Drawdown (MDD)**
+  - `MDD = max(peak - trough) / peak`（基于权益曲线）
+- **Sharpe Ratio (SR)**
+  - `SR = mean(returns - rf) / std(returns)`
+- **Win Rate (WR)**
+  - `WR = #win_trades / #total_trades`
+- **Cost Ratio (CR)**
+  - `CR = total_cost / total_turnover`
+- **Max Losing Streak (MLS)**
+  - 统计连续亏损次数的最大值
+
+### 18.2 归一化与评分
+
+为了可比较性，建议对各指标进行 **0-100 归一化**：
+
+- 对“越大越好”的指标（TR, SR, WR）：
+  - `score = 100 * (x - min) / (max - min)`
+- 对“越小越好”的指标（MDD, CR, MLS）：
+  - `score = 100 * (max - x) / (max - min)`
+
+### 18.3 异常处理
+
+- 指标缺失：填充为同类指标中位数。
+- 分母为 0：给最差分或剔除该指标。
+- 极端值处理：对 TR、SR 进行 `winsorize` 限幅。
+
+### 18.4 综合评分公式
+
+`FinalScore = Σ(weight_i * score_i)`
+
+系统支持两种预设权重：
+- **稳健型**：TR 30%, MDD 25%, SR 20%, WR 10%, CR 10%, MLS 5%
+- **收益型**：TR 45%, MDD 15%, SR 15%, WR 10%, CR 10%, MLS 5%
+
+---
+
+## 19. 竞赛数据模型与 ER 结构
+
+### 19.1 数据表建议
+
+- `competitions`
+  - id, name, market, mode(backtest/paper/live), start_time, end_time, status, config_json
+- `competition_participants`
+  - id, competition_id, trader_id, model_id, strategy_id, config_json
+- `competition_runs`
+  - id, competition_id, start_time, end_time, status
+- `competition_metrics`
+  - participant_id, TR, MDD, SR, WR, CR, MLS, final_score
+- `competition_equity`
+  - participant_id, ts, equity, pnl
+- `competition_trades`
+  - participant_id, ts, symbol, side, qty, price, cost, pnl
+
+### 19.2 ER 关系概览
+
+```
+competitions (1) ──< competition_participants >── (N) traders
+competitions (1) ──< competition_runs
+participants (1) ──< competition_metrics
+participants (1) ──< competition_equity
+participants (1) ──< competition_trades
+```
+
+---
+
+## 20. 前端竞赛交互原型
+
+### 20.1 页面结构
+
+- 竞赛列表页（/competition）
+  - 竞赛卡片、状态、排名
+- 竞赛详情页（/competition/:id）
+  - Leaderboard + Equity 曲线 + 交易明细
+- Trader 详情页（/competition/:id/trader/:traderId）
+  - 决策日志 + 仓位/成交
+- 创建竞赛页（/competition/create）
+  - 配置表单 + 策略选择
+
+### 20.2 组件层级
+
+```
+CompetitionPage
+ ├─ CompetitionHeader
+ ├─ LeaderboardTable
+ ├─ EquityChart
+ ├─ TradesTable
+ └─ DecisionLogPanel
+```
+
+### 20.3 状态管理
+
+- 使用 `swr` 或 `react-query` 拉取榜单/曲线
+- SSE/WebSocket 实时更新排名
+
+---
+
+## 21. 竞赛调度与并发机制
+
+### 21.1 调度框架
+- 使用 Celery / Arq 调度竞赛任务
+- 每个竞赛作为一个独立 task group
+
+### 21.2 并发隔离
+- 每个 Trader 独立进程/线程
+- 数据快照服务必须是单线程广播
+
+### 21.3 资源限额
+- 最大并发 Trader 数量限制
+- 单竞赛最大参赛者限制
+
+---
+
+## 22. 风控与合规条款细化
+
+### 22.1 A股规则
+- 涨跌停限制
+- T+1 交易
+- 100 股整数手
+
+### 22.2 港股规则
+- Board Lot 校验
+- 波动机制（如 VCM）
+
+### 22.3 合规提示
+- 强制风险提示弹窗
+- 回测收益不得宣传
+
+---
+
+## 23. 竞赛回放与可复现机制
+
+### 23.1 回放机制
+- 保存所有 Market Snapshot + Decision JSON
+- 可重放交易路径
+
+### 23.2 可复现策略
+- 冻结数据版本
+- 固定模型/参数版本
+- 固定随机种子
+
+---
+
