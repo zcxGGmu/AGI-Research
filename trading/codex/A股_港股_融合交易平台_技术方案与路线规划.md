@@ -337,3 +337,149 @@ project/
 
 ---
 
+
+---
+
+## 15. 多 AI 竞赛模块（NOFX 思路迁移）
+
+> 目标：在 A/HK 场景复现 NOFX 的“多 AI Trader 竞赛”，用于策略对比与稳健性评估。竞赛默认运行在 **回测或 Paper Trading**，实盘需强约束。
+
+### 15.1 模块划分与职责
+
+- **Competition Manager**
+  - 创建/启动/停止竞赛
+  - 协调数据快照与调度周期
+- **Market Snapshot Bus**
+  - 统一时间戳行情与基本面数据
+  - 避免各参赛者获取“不同步”数据
+- **AI Trader Pool**
+  - 每个 AI Trader 绑定一个模型 + 策略配置
+  - 独立账户/仓位/风险控制
+- **Risk Engine（强制）**
+  - A/HK 交易规则校验
+  - 资金与仓位阈值
+- **Scoring Engine**
+  - 统一绩效指标与权重
+  - 输出排行榜
+- **Audit & Replay**
+  - 保存决策日志、订单与权益曲线
+  - 支持回放
+
+### 15.2 时序图（ASCII）
+
+#### 15.2.1 回测竞赛时序
+```
+[Competition Manager]
+      |
+      | 生成统一回测时间轴
+      v
+[Market Snapshot Bus] -----> 向所有参赛者广播相同快照
+      |
+      v
+[AI Trader Pool] -> 每个 Trader 生成决策
+      |
+      v
+[Risk Engine] -> 校验(拒绝/通过)
+      |
+      v
+[Backtest Execution] -> 撮合成交 -> 记录订单/权益
+      |
+      v
+[Scoring Engine] -> 计算指标 -> Leaderboard
+```
+
+#### 15.2.2 Paper Trading 竞赛时序
+```
+[Market Snapshot Bus] -> 实时行情推送
+      |
+      v
+[AI Trader Pool] -> 决策 -> 风控
+      |
+      v
+[Paper Broker] -> 模拟成交 -> 存储日志
+      |
+      v
+[Scoring Engine] -> 实时榜单更新（SSE/WebSocket）
+```
+
+### 15.3 评分指标体系（建议权重）
+
+> 评分需区分“收益型”与“稳健型”。建议提供两套可切换权重。
+
+**默认稳健型权重示例：**
+- 总收益率（Total Return）: 30%
+- 最大回撤（Max Drawdown）: 25%
+- 夏普比率（Sharpe）: 20%
+- 胜率（Win Rate）: 10%
+- 交易成本占比（Cost Ratio）: 10%
+- 最大连亏（Max Losing Streak）: 5%
+
+**收益型权重示例：**
+- 总收益率: 45%
+- 最大回撤: 15%
+- 夏普: 15%
+- 胜率: 10%
+- 交易成本占比: 10%
+- 最大连亏: 5%
+
+### 15.4 数据一致性与防偏差机制
+
+为避免竞赛结果受数据差异影响，必须实施：
+- **时间对齐**：所有 Trader 使用同一时间戳快照。
+- **数据冻结**：回测模式使用冻结历史数据集。
+- **统一复权口径**：同一回测内一致使用前/后复权。
+- **交易成本统一**：佣金、滑点、税费统一模型。
+- **交易日历统一**：非交易日禁止决策。
+- **延迟模拟**（选配）：设定统一决策延迟（如 1 根 K 线后成交）。
+
+### 15.5 API 设计（竞赛相关）
+
+- `POST /competitions` 创建竞赛
+- `POST /competitions/{id}/start` 启动
+- `POST /competitions/{id}/stop` 停止
+- `GET /competitions/{id}/status` 状态
+- `GET /competitions/{id}/leaderboard` 排行榜
+- `GET /competitions/{id}/stream` 实时推送
+- `GET /competitions/{id}/participants` 参赛者配置
+
+### 15.6 前端 UI 草案与路由建议
+
+**页面结构：**
+- `/competition`：竞赛首页
+- `/competition/:id`：竞赛详情（排行榜 + 交易明细）
+- `/competition/:id/trader/:traderId`：单一 Trader 视图
+- `/competition/create`：创建竞赛向导
+
+**核心组件建议：**
+- 竞赛榜单卡片（LeaderboardCard）
+- Trader 绩效曲线（EquityChart）
+- 决策日志面板（DecisionLogPanel）
+- 交易明细表（TradesTable）
+
+---
+
+## 16. 多 AI 竞赛纳入开发路线
+
+建议在 Phase 2（回测）后插入竞赛子阶段：
+
+- **Phase 2.5（2-3 周）**：
+  - 完成 Competition Manager
+  - 实现回测竞赛榜单
+  - 实现 SSE 推送竞赛状态
+
+- **Phase 3.5（2-3 周）**：
+  - 实现 Paper 竞赛
+  - 支持多 Trader 并行运行
+
+实盘竞赛仅建议在 Phase 4 之后，并配置“人工确认开关”。
+
+---
+
+## 17. 竞赛模块风险与合规说明
+
+- **回测竞赛**：无合规风险，但需标注“历史表现不代表未来”。
+- **Paper 竞赛**：禁止模拟收益宣传，必须提示“非真实收益”。
+- **实盘竞赛**：若涉及多账户管理，需券商合规支持。
+
+---
+
